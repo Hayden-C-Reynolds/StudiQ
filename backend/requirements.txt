@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+anthropic
+PyPDF2
+Pillow
+pillow-heif
+httpx
+python-multipart

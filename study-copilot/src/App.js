@@ -354,7 +354,7 @@ function StudyPlanScreen({ cls, onBack, user, onSyncDeadlines }) {
     setSyncing(true);
     setSyncMsg("");
     try {
-      const res = await fetch("http://127.0.0.1:8000/extract-deadlines", {
+      const res = await fetch(`${API_BASE}/extract-deadlines`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ study_plan: plan }),
@@ -401,7 +401,7 @@ function StudyPlanScreen({ cls, onBack, user, onSyncDeadlines }) {
     fd.append("user_education", user?.education || "");
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/study-plan", {
+      const res = await fetch(`${API_BASE}/study-plan`, {
         method: "POST",
         body: fd,
       });
@@ -431,7 +431,7 @@ function StudyPlanScreen({ cls, onBack, user, onSyncDeadlines }) {
     setChatLoading(true);
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/study-plan-chat", {
+      const res = await fetch(`${API_BASE}/study-plan-chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ study_plan: plan, message: text, history, user_name: user?.name || "", user_role: user?.role || "" }),
@@ -1286,7 +1286,7 @@ function TutorScreen({ cls, onBack, user }) {
   const sendToApi = async (formData, currentMsgs, userText) => {
     setLoading(true);
     try {
-      const res = await fetch("http://127.0.0.1:8000/tutor", {
+      const res = await fetch(`${API_BASE}/tutor`, {
         method: "POST",
         body: formData,
       });
@@ -1296,7 +1296,7 @@ function TutorScreen({ cls, onBack, user }) {
       let videoSuggestion = null;
       if (isConceptQuestion(userText)) {
         try {
-          const vRes = await fetch("http://127.0.0.1:8000/get-video-suggestion", {
+          const vRes = await fetch(`${API_BASE}/get-video-suggestion`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ topic: userText, subject: cls.subject.label }),
@@ -1365,7 +1365,7 @@ function TutorScreen({ cls, onBack, user }) {
     const history = buildApiHistory(messages);
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/tutor-action", {
+      const res = await fetch(`${API_BASE}/tutor-action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1638,7 +1638,7 @@ function PracticeTestScreen({ cls, onBack, user }) {
     if (configFile) fd.append("file", configFile);
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/practice-test-generate", { method: "POST", body: fd });
+      const res = await fetch(`${API_BASE}/practice-test-generate`, { method: "POST", body: fd });
       const data = await res.json();
       if (data.error) {
         setGenError(data.message || "Failed to generate questions.");
@@ -1662,7 +1662,7 @@ function PracticeTestScreen({ cls, onBack, user }) {
     setGrading(true);
     const answers = questions.map((q) => ({ question_id: q.id, student_answer: mockAnswers[q.id] || "" }));
     try {
-      const res = await fetch("http://127.0.0.1:8000/practice-test-grade", {
+      const res = await fetch(`${API_BASE}/practice-test-grade`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ class_name: cls.name, subject: cls.subject.label, questions, answers }),
@@ -1686,14 +1686,14 @@ function PracticeTestScreen({ cls, onBack, user }) {
       fd.append("subject", cls.subject.label);
       fd.append("image", quizImageFile);
       try {
-        const res = await fetch("http://127.0.0.1:8000/practice-test-grade-image", { method: "POST", body: fd });
+        const res = await fetch(`${API_BASE}/practice-test-grade-image`, { method: "POST", body: fd });
         const data = await res.json();
         setQuizFeedback({ correct: data.correct, explanation: data.explanation, correctAnswer: q.correctAnswer, studentAnswer: data.studentAnswer });
         setQuizHistory((prev) => [...prev, { questionId: q.id, correct: data.correct, score: data.score || 0 }]);
       } catch { setQuizFeedback({ correct: false, explanation: "Could not grade.", correctAnswer: q.correctAnswer, studentAnswer: "" }); }
     } else {
       try {
-        const res = await fetch("http://127.0.0.1:8000/practice-test-grade", {
+        const res = await fetch(`${API_BASE}/practice-test-grade`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ class_name: cls.name, subject: cls.subject.label, questions: [q], answers: [{ question_id: q.id, student_answer: quizAnswer }] }),
@@ -1726,7 +1726,7 @@ function PracticeTestScreen({ cls, onBack, user }) {
     setQuizHintLoading(true);
     const q = questions[quizIndex];
     try {
-      const res = await fetch("http://127.0.0.1:8000/practice-test-hint", {
+      const res = await fetch(`${API_BASE}/practice-test-hint`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ class_name: cls.name, subject: cls.subject.label, question: q.question, options: q.options }),
@@ -1741,7 +1741,7 @@ function PracticeTestScreen({ cls, onBack, user }) {
     setQuizExplainLoading(true);
     const q = questions[quizIndex];
     try {
-      const res = await fetch("http://127.0.0.1:8000/practice-test-explain", {
+      const res = await fetch(`${API_BASE}/practice-test-explain`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ class_name: cls.name, subject: cls.subject.label, question: q.question, correct_answer: q.correctAnswer, options: q.options }),
@@ -2501,6 +2501,8 @@ function AppSidebar({ isOpen, onClose, deadlines, todos, classes, onAddDeadline,
 /* ═══════════════════════════════════════════════════════
    ROOT APP
 ═══════════════════════════════════════════════════════ */
+
+const API_BASE = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
 
 export default function App() {
   const [user, setUser]                   = useState(null);
