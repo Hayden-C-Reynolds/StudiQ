@@ -1,5 +1,52 @@
 // ── Supabase migrations (run manually in Supabase SQL editor) ─────────────────
 //
+// -- classes table
+// create table classes (
+//   id text,
+//   user_id uuid references auth.users on delete cascade,
+//   name text,
+//   subject jsonb,
+//   goal text,
+//   created_at timestamp with time zone default timezone('utc', now()),
+//   primary key (id, user_id)
+// );
+// alter table classes enable row level security;
+// create policy "Users can manage own classes" on classes
+//   for all using (auth.uid() = user_id);
+//
+// -- deadlines table
+// create table deadlines (
+//   id text,
+//   user_id uuid references auth.users on delete cascade,
+//   title text,
+//   class_id text,
+//   class_name text,
+//   iso_date text,
+//   display_date text,
+//   date text,
+//   days_until integer,
+//   type text,
+//   is_manual boolean default true,
+//   primary key (id, user_id)
+// );
+// alter table deadlines enable row level security;
+// create policy "Users can manage own deadlines" on deadlines
+//   for all using (auth.uid() = user_id);
+//
+// -- todos table
+// create table todos (
+//   id text,
+//   user_id uuid references auth.users on delete cascade,
+//   text text,
+//   done boolean default false,
+//   class_id text,
+//   created_at timestamp with time zone default timezone('utc', now()),
+//   primary key (id, user_id)
+// );
+// alter table todos enable row level security;
+// create policy "Users can manage own todos" on todos
+//   for all using (auth.uid() = user_id);
+//
 // -- chat_history table
 // create table chat_history (
 //   id uuid default gen_random_uuid() primary key,
@@ -2849,6 +2896,8 @@ export default function App() {
   const [showModal, setShowModal]         = useState(false);
   const [sidebarOpen, setSidebarOpen]     = useState(false);
 
+  const dataLoadedRef = useRef(false);
+
   // ── Auth: session + profile loading
   const loadProfile = async (userId) => {
     try {
@@ -2864,6 +2913,11 @@ export default function App() {
       }
     } catch {
       setUser(null);
+    }
+    // Load classes/deadlines/todos once per login
+    if (!dataLoadedRef.current) {
+      await loadUserData(userId);
+      dataLoadedRef.current = true;
     }
     setAuthLoading(false);
   };
@@ -2907,14 +2961,53 @@ export default function App() {
     await supabase.auth.signOut();
     setUser(null);
     setSession(null);
+    setClasses([]);
+    setDeadlines([]);
+    setTodos([]);
+    dataLoadedRef.current = false;
   };
 
   // ── Global deadlines state
   const [deadlines, setDeadlines] = useState([]);
-  const handleAddDeadline    = (dl)         => setDeadlines(prev => [...prev, dl]);
-  const handleDeleteDeadline = (id)         => setDeadlines(prev => prev.filter(d => d.id !== id));
-  const handleUpdateDeadline = (id, changes) => setDeadlines(prev => prev.map(d => d.id === id ? { ...d, ...changes } : d));
-  const handleSyncDeadlines  = (raw, cls) => {
+
+  const handleAddDeadline = (dl) => {
+    setDeadlines(prev => [...prev, dl]);
+    if (session?.user?.id) {
+      supabase.from('deadlines').upsert({
+        id: dl.id, user_id: session.user.id, title: dl.title,
+        class_id: dl.classId || null, class_name: dl.className || null,
+        iso_date: dl.isoDate || null, display_date: dl.displayDate || null,
+        date: dl.date || null, days_until: dl.daysUntil ?? null,
+        type: dl.type || 'other', is_manual: dl.isManual ?? true,
+      }).catch(() => {});
+    }
+  };
+
+  const handleDeleteDeadline = (id) => {
+    setDeadlines(prev => prev.filter(d => d.id !== id));
+    if (session?.user?.id) {
+      supabase.from('deadlines').delete().eq('id', id).eq('user_id', session.user.id).catch(() => {});
+    }
+  };
+
+  const handleUpdateDeadline = (id, changes) => {
+    setDeadlines(prev => prev.map(d => d.id === id ? { ...d, ...changes } : d));
+    if (session?.user?.id) {
+      const db = {};
+      if ('title'       in changes) db.title        = changes.title;
+      if ('classId'     in changes) db.class_id     = changes.classId;
+      if ('className'   in changes) db.class_name   = changes.className;
+      if ('isoDate'     in changes) db.iso_date     = changes.isoDate;
+      if ('displayDate' in changes) db.display_date = changes.displayDate;
+      if ('date'        in changes) db.date         = changes.date;
+      if ('daysUntil'   in changes) db.days_until   = changes.daysUntil;
+      if ('type'        in changes) db.type         = changes.type;
+      supabase.from('deadlines').update(db).eq('id', id).eq('user_id', session.user.id).catch(() => {});
+    }
+  };
+
+  const handleSyncDeadlines = (raw, cls) => {
+    const userId = session?.user?.id;
     const mapped = raw.map(d => ({
       id: uid(),
       title: d.title,
@@ -2931,13 +3024,98 @@ export default function App() {
       ...prev.filter(d => d.classId !== cls.id || d.isManual),
       ...mapped,
     ]);
+    if (userId) {
+      // Delete old non-manual deadlines for this class, then insert new ones
+      supabase.from('deadlines')
+        .delete().eq('user_id', userId).eq('class_id', cls.id).eq('is_manual', false)
+        .then(() => {
+          if (mapped.length === 0) return;
+          return supabase.from('deadlines').upsert(mapped.map(dl => ({
+            id: dl.id, user_id: userId, title: dl.title,
+            class_id: dl.classId || null, class_name: dl.className || null,
+            iso_date: dl.isoDate || null, display_date: dl.displayDate || null,
+            date: dl.date || null, days_until: dl.daysUntil ?? null,
+            type: dl.type || 'other', is_manual: false,
+          })));
+        })
+        .catch(() => {});
+    }
   };
 
   // ── Global todos state
   const [todos, setTodos] = useState([]);
-  const handleAddTodo    = (todo) => setTodos(prev => [...prev, todo]);
-  const handleToggleTodo = (id)   => setTodos(prev => prev.map(t => t.id === id ? { ...t, done: !t.done } : t));
-  const handleDeleteTodo = (id)   => setTodos(prev => prev.filter(t => t.id !== id));
+
+  const handleAddTodo = (todo) => {
+    setTodos(prev => [...prev, todo]);
+    if (session?.user?.id) {
+      supabase.from('todos').upsert({
+        id: todo.id, user_id: session.user.id, text: todo.text,
+        done: todo.done, class_id: todo.classId || null,
+      }).catch(() => {});
+    }
+  };
+
+  const handleToggleTodo = (id) => {
+    setTodos(prev => {
+      const todo = prev.find(t => t.id === id);
+      if (!todo) return prev;
+      const newDone = !todo.done;
+      if (session?.user?.id) {
+        supabase.from('todos').update({ done: newDone }).eq('id', id).eq('user_id', session.user.id).catch(() => {});
+      }
+      return prev.map(t => t.id === id ? { ...t, done: newDone } : t);
+    });
+  };
+
+  const handleDeleteTodo = (id) => {
+    setTodos(prev => prev.filter(t => t.id !== id));
+    if (session?.user?.id) {
+      supabase.from('todos').delete().eq('id', id).eq('user_id', session.user.id).catch(() => {});
+    }
+  };
+
+  // ── Load all user data from Supabase on first login
+  const loadUserData = async (userId) => {
+    try {
+      const [{ data: classRows }, { data: dlRows }, { data: todoRows }] = await Promise.all([
+        supabase.from('classes').select('*').eq('user_id', userId),
+        supabase.from('deadlines').select('*').eq('user_id', userId),
+        supabase.from('todos').select('*').eq('user_id', userId),
+      ]);
+      if (classRows?.length > 0) {
+        setClasses(classRows.map(r => ({
+          id: r.id,
+          name: r.name,
+          subject: r.subject,
+          goal: r.goal || "",
+        })));
+      }
+      if (dlRows?.length > 0) {
+        setDeadlines(dlRows.map(r => ({
+          id: r.id,
+          title: r.title,
+          classId: r.class_id,
+          className: r.class_name,
+          isoDate: r.iso_date,
+          displayDate: r.display_date,
+          date: r.date,
+          daysUntil: r.days_until,
+          type: r.type,
+          isManual: r.is_manual,
+        })));
+      }
+      if (todoRows?.length > 0) {
+        setTodos(todoRows.map(r => ({
+          id: r.id,
+          text: r.text,
+          done: r.done,
+          classId: r.class_id,
+        })));
+      }
+    } catch {
+      // fail silently — local state stays empty, app still works
+    }
+  };
 
   // ── Routing guards
   if (authLoading) {
@@ -2959,6 +3137,9 @@ export default function App() {
     const updated = (prev) => prev.map(c => c.id === classId ? { ...c, goal: newGoal } : c);
     setClasses(updated);
     setActiveClass(prev => prev?.id === classId ? { ...prev, goal: newGoal } : prev);
+    if (session?.user?.id) {
+      supabase.from('classes').update({ goal: newGoal }).eq('id', classId).eq('user_id', session.user.id).catch(() => {});
+    }
   };
 
   const handleSelectFeature = (feature) => {
@@ -3021,7 +3202,18 @@ export default function App() {
       {showModal && (
         <CreateClassModal
           onClose={() => setShowModal(false)}
-          onCreate={(newClass) => setClasses((prev) => [...prev, newClass])}
+          onCreate={(newClass) => {
+            setClasses((prev) => [...prev, newClass]);
+            if (session?.user?.id) {
+              supabase.from('classes').upsert({
+                id: newClass.id,
+                user_id: session.user.id,
+                name: newClass.name,
+                subject: newClass.subject,
+                goal: newClass.goal || "",
+              }).catch(() => {});
+            }
+          }}
         />
       )}
     </>
