@@ -432,21 +432,27 @@ function StudyPlanScreen({ cls, onBack, user, onSyncDeadlines, session }) {
 
   useEffect(() => {
     const loadSaved = async () => {
-      if (!session?.user?.id) { setHistoryLoading(false); return; }
-      try {
-        const { data } = await supabase
-          .from('chat_history')
-          .select('messages')
-          .eq('user_id', session.user.id)
-          .eq('class_id', String(cls.id))
-          .eq('feature', 'study-plan')
-          .single();
+      if (!session?.user?.id) {
+        console.log('[StudyPlan] No session — skipping history load');
+        setHistoryLoading(false);
+        return;
+      }
+      console.log('[StudyPlan] Loading saved plan for user:', session.user.id, 'class:', cls.id);
+      const { data, error } = await supabase
+        .from('chat_history')
+        .select('messages')
+        .eq('user_id', session.user.id)
+        .eq('class_id', String(cls.id))
+        .eq('feature', 'study-plan')
+        .maybeSingle();
+      if (error) {
+        console.error('[StudyPlan] Load error:', error);
+      } else {
+        console.log('[StudyPlan] Loaded:', data);
         if (data?.messages) {
           if (data.messages.plan) setPlan(data.messages.plan);
           if (data.messages.chatMsgs?.length > 0) setChatMsgs(data.messages.chatMsgs);
         }
-      } catch {
-        // fail gracefully — Supabase unavailable or no saved data
       }
       setHistoryLoading(false);
     };
@@ -455,17 +461,19 @@ function StudyPlanScreen({ cls, onBack, user, onSyncDeadlines, session }) {
 
   const savePlanToSupabase = async (currentPlan, currentChatMsgs) => {
     if (!session?.user?.id) return;
-    try {
-      await supabase.from('chat_history').upsert({
-        user_id: session.user.id,
-        class_id: String(cls.id),
-        class_name: cls.name,
-        feature: 'study-plan',
-        messages: { plan: currentPlan, chatMsgs: currentChatMsgs },
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id,class_id,feature' });
-    } catch {
-      // fail gracefully
+    console.log('[StudyPlan] Saving plan for user:', session.user.id, 'class:', cls.id);
+    const { error } = await supabase.from('chat_history').upsert({
+      user_id: session.user.id,
+      class_id: String(cls.id),
+      class_name: cls.name,
+      feature: 'study-plan',
+      messages: { plan: currentPlan, chatMsgs: currentChatMsgs },
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,class_id,feature' });
+    if (error) {
+      console.error('[StudyPlan] Save error:', error);
+    } else {
+      console.log('[StudyPlan] Save successful');
     }
   };
 
@@ -1537,20 +1545,26 @@ function TutorScreen({ cls, onBack, user, session }) {
   // Load saved history on mount
   useEffect(() => {
     const loadHistory = async () => {
-      if (!session?.user?.id) { setHistoryLoading(false); return; }
-      try {
-        const { data } = await supabase
-          .from('chat_history')
-          .select('messages')
-          .eq('user_id', session.user.id)
-          .eq('class_id', String(cls.id))
-          .eq('feature', 'tutor')
-          .single();
+      if (!session?.user?.id) {
+        console.log('[Tutor] No session — skipping history load');
+        setHistoryLoading(false);
+        return;
+      }
+      console.log('[Tutor] Loading history for user:', session.user.id, 'class:', cls.id);
+      const { data, error } = await supabase
+        .from('chat_history')
+        .select('messages')
+        .eq('user_id', session.user.id)
+        .eq('class_id', String(cls.id))
+        .eq('feature', 'tutor')
+        .maybeSingle();
+      if (error) {
+        console.error('[Tutor] Load error:', error);
+      } else {
+        console.log('[Tutor] Loaded:', data);
         if (data?.messages?.length > 0) {
           setMessages(data.messages.map((m) => ({ ...m, id: m.id || uid() })));
         }
-      } catch {
-        // fail gracefully — Supabase unavailable or no saved data
       }
       setHistoryLoading(false);
     };
@@ -1561,17 +1575,19 @@ function TutorScreen({ cls, onBack, user, session }) {
     if (!session?.user?.id) return;
     // Strip imagePreview (potentially large base64) before saving; cap at 20 messages
     const toSave = msgs.slice(-20).map(({ imagePreview: _ip, ...rest }) => rest);
-    try {
-      await supabase.from('chat_history').upsert({
-        user_id: session.user.id,
-        class_id: String(cls.id),
-        class_name: cls.name,
-        feature: 'tutor',
-        messages: toSave,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id,class_id,feature' });
-    } catch {
-      // fail gracefully
+    console.log('[Tutor] Saving', toSave.length, 'messages for user:', session.user.id, 'class:', cls.id);
+    const { error } = await supabase.from('chat_history').upsert({
+      user_id: session.user.id,
+      class_id: String(cls.id),
+      class_name: cls.name,
+      feature: 'tutor',
+      messages: toSave,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,class_id,feature' });
+    if (error) {
+      console.error('[Tutor] Save error:', error);
+    } else {
+      console.log('[Tutor] Save successful');
     }
   };
 
