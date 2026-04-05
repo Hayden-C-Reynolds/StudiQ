@@ -2970,27 +2970,31 @@ export default function App() {
   // ── Global deadlines state
   const [deadlines, setDeadlines] = useState([]);
 
-  const handleAddDeadline = (dl) => {
+  const handleAddDeadline = async (dl) => {
     setDeadlines(prev => [...prev, dl]);
     if (session?.user?.id) {
-      supabase.from('deadlines').upsert({
-        id: dl.id, user_id: session.user.id, title: dl.title,
-        class_id: dl.classId || null, class_name: dl.className || null,
-        iso_date: dl.isoDate || null, display_date: dl.displayDate || null,
-        date: dl.date || null, days_until: dl.daysUntil ?? null,
-        type: dl.type || 'other', is_manual: dl.isManual ?? true,
-      }).catch(() => {});
+      try {
+        await supabase.from('deadlines').upsert({
+          id: dl.id, user_id: session.user.id, title: dl.title,
+          class_id: dl.classId || null, class_name: dl.className || null,
+          iso_date: dl.isoDate || null, display_date: dl.displayDate || null,
+          date: dl.date || null, days_until: dl.daysUntil ?? null,
+          type: dl.type || 'other', is_manual: dl.isManual ?? true,
+        });
+      } catch { /* fail silently */ }
     }
   };
 
-  const handleDeleteDeadline = (id) => {
+  const handleDeleteDeadline = async (id) => {
     setDeadlines(prev => prev.filter(d => d.id !== id));
     if (session?.user?.id) {
-      supabase.from('deadlines').delete().eq('id', id).eq('user_id', session.user.id).catch(() => {});
+      try {
+        await supabase.from('deadlines').delete().eq('id', id).eq('user_id', session.user.id);
+      } catch { /* fail silently */ }
     }
   };
 
-  const handleUpdateDeadline = (id, changes) => {
+  const handleUpdateDeadline = async (id, changes) => {
     setDeadlines(prev => prev.map(d => d.id === id ? { ...d, ...changes } : d));
     if (session?.user?.id) {
       const db = {};
@@ -3002,7 +3006,9 @@ export default function App() {
       if ('date'        in changes) db.date         = changes.date;
       if ('daysUntil'   in changes) db.days_until   = changes.daysUntil;
       if ('type'        in changes) db.type         = changes.type;
-      supabase.from('deadlines').update(db).eq('id', id).eq('user_id', session.user.id).catch(() => {});
+      try {
+        await supabase.from('deadlines').update(db).eq('id', id).eq('user_id', session.user.id);
+      } catch { /* fail silently */ }
     }
   };
 
@@ -3025,52 +3031,57 @@ export default function App() {
       ...mapped,
     ]);
     if (userId) {
-      // Delete old non-manual deadlines for this class, then insert new ones
-      supabase.from('deadlines')
-        .delete().eq('user_id', userId).eq('class_id', cls.id).eq('is_manual', false)
-        .then(() => {
-          if (mapped.length === 0) return;
-          return supabase.from('deadlines').upsert(mapped.map(dl => ({
-            id: dl.id, user_id: userId, title: dl.title,
-            class_id: dl.classId || null, class_name: dl.className || null,
-            iso_date: dl.isoDate || null, display_date: dl.displayDate || null,
-            date: dl.date || null, days_until: dl.daysUntil ?? null,
-            type: dl.type || 'other', is_manual: false,
-          })));
-        })
-        .catch(() => {});
+      (async () => {
+        try {
+          await supabase.from('deadlines')
+            .delete().eq('user_id', userId).eq('class_id', cls.id).eq('is_manual', false);
+          if (mapped.length > 0) {
+            await supabase.from('deadlines').upsert(mapped.map(dl => ({
+              id: dl.id, user_id: userId, title: dl.title,
+              class_id: dl.classId || null, class_name: dl.className || null,
+              iso_date: dl.isoDate || null, display_date: dl.displayDate || null,
+              date: dl.date || null, days_until: dl.daysUntil ?? null,
+              type: dl.type || 'other', is_manual: false,
+            })));
+          }
+        } catch { /* fail silently */ }
+      })();
     }
   };
 
   // ── Global todos state
   const [todos, setTodos] = useState([]);
 
-  const handleAddTodo = (todo) => {
+  const handleAddTodo = async (todo) => {
     setTodos(prev => [...prev, todo]);
     if (session?.user?.id) {
-      supabase.from('todos').upsert({
-        id: todo.id, user_id: session.user.id, text: todo.text,
-        done: todo.done, class_id: todo.classId || null,
-      }).catch(() => {});
+      try {
+        await supabase.from('todos').upsert({
+          id: todo.id, user_id: session.user.id, text: todo.text,
+          done: todo.done, class_id: todo.classId || null,
+        });
+      } catch { /* fail silently */ }
     }
   };
 
-  const handleToggleTodo = (id) => {
-    setTodos(prev => {
-      const todo = prev.find(t => t.id === id);
-      if (!todo) return prev;
-      const newDone = !todo.done;
-      if (session?.user?.id) {
-        supabase.from('todos').update({ done: newDone }).eq('id', id).eq('user_id', session.user.id).catch(() => {});
-      }
-      return prev.map(t => t.id === id ? { ...t, done: newDone } : t);
-    });
+  const handleToggleTodo = async (id) => {
+    const todo = todos.find(t => t.id === id);
+    if (!todo) return;
+    const newDone = !todo.done;
+    setTodos(prev => prev.map(t => t.id === id ? { ...t, done: newDone } : t));
+    if (session?.user?.id) {
+      try {
+        await supabase.from('todos').update({ done: newDone }).eq('id', id).eq('user_id', session.user.id);
+      } catch { /* fail silently */ }
+    }
   };
 
-  const handleDeleteTodo = (id) => {
+  const handleDeleteTodo = async (id) => {
     setTodos(prev => prev.filter(t => t.id !== id));
     if (session?.user?.id) {
-      supabase.from('todos').delete().eq('id', id).eq('user_id', session.user.id).catch(() => {});
+      try {
+        await supabase.from('todos').delete().eq('id', id).eq('user_id', session.user.id);
+      } catch { /* fail silently */ }
     }
   };
 
@@ -3133,12 +3144,14 @@ export default function App() {
     setView("class");
   };
 
-  const handleUpdateGoal = (classId, newGoal) => {
+  const handleUpdateGoal = async (classId, newGoal) => {
     const updated = (prev) => prev.map(c => c.id === classId ? { ...c, goal: newGoal } : c);
     setClasses(updated);
     setActiveClass(prev => prev?.id === classId ? { ...prev, goal: newGoal } : prev);
     if (session?.user?.id) {
-      supabase.from('classes').update({ goal: newGoal }).eq('id', classId).eq('user_id', session.user.id).catch(() => {});
+      try {
+        await supabase.from('classes').update({ goal: newGoal }).eq('id', classId).eq('user_id', session.user.id);
+      } catch { /* fail silently */ }
     }
   };
 
@@ -3202,16 +3215,18 @@ export default function App() {
       {showModal && (
         <CreateClassModal
           onClose={() => setShowModal(false)}
-          onCreate={(newClass) => {
+          onCreate={async (newClass) => {
             setClasses((prev) => [...prev, newClass]);
             if (session?.user?.id) {
-              supabase.from('classes').upsert({
-                id: newClass.id,
-                user_id: session.user.id,
-                name: newClass.name,
-                subject: newClass.subject,
-                goal: newClass.goal || "",
-              }).catch(() => {});
+              try {
+                await supabase.from('classes').upsert({
+                  id: newClass.id,
+                  user_id: session.user.id,
+                  name: newClass.name,
+                  subject: newClass.subject,
+                  goal: newClass.goal || "",
+                });
+              } catch { /* fail silently */ }
             }
           }}
         />
