@@ -1,3 +1,39 @@
+// ── Supabase migrations (run manually in Supabase SQL editor) ─────────────────
+//
+// -- chat_history table
+// create table chat_history (
+//   id uuid default gen_random_uuid() primary key,
+//   user_id uuid references auth.users on delete cascade,
+//   class_id text,
+//   class_name text,
+//   feature text, -- 'tutor' or 'study-plan'
+//   messages jsonb,
+//   updated_at timestamp with time zone default timezone('utc', now())
+// );
+// alter table chat_history enable row level security;
+// create policy "Users can manage own chat history" on chat_history
+//   for all using (auth.uid() = user_id);
+// -- Required for upsert conflict resolution:
+// alter table chat_history
+//   add constraint chat_history_user_class_feature_key
+//   unique (user_id, class_id, feature);
+//
+// -- user_analytics table
+// create table user_analytics (
+//   id uuid default gen_random_uuid() primary key,
+//   user_id uuid references auth.users on delete cascade,
+//   event text not null,
+//   metadata jsonb,
+//   created_at timestamp with time zone default timezone('utc', now())
+// );
+// alter table user_analytics enable row level security;
+// create policy "Users can insert own analytics" on user_analytics
+//   for insert with check (auth.uid() = user_id);
+// create policy "Users can read own analytics" on user_analytics
+//   for select using (auth.uid() = user_id);
+//
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { useState, useRef, useEffect } from "react";
 import "./App.css";
 import { InlineMath, BlockMath } from "react-katex";
@@ -344,6 +380,48 @@ function StudyPlanScreen({ cls, onBack, user, onSyncDeadlines, session }) {
   const [chatLoading, setChatLoading] = useState(false);
   const chatLogRef = useRef(null);
 
+  // Supabase persistence
+  const [historyLoading, setHistoryLoading] = useState(true);
+
+  useEffect(() => {
+    const loadSaved = async () => {
+      if (!session?.user?.id) { setHistoryLoading(false); return; }
+      try {
+        const { data } = await supabase
+          .from('chat_history')
+          .select('messages')
+          .eq('user_id', session.user.id)
+          .eq('class_id', String(cls.id))
+          .eq('feature', 'study-plan')
+          .single();
+        if (data?.messages) {
+          if (data.messages.plan) setPlan(data.messages.plan);
+          if (data.messages.chatMsgs?.length > 0) setChatMsgs(data.messages.chatMsgs);
+        }
+      } catch {
+        // fail gracefully — Supabase unavailable or no saved data
+      }
+      setHistoryLoading(false);
+    };
+    loadSaved();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const savePlanToSupabase = async (currentPlan, currentChatMsgs) => {
+    if (!session?.user?.id) return;
+    try {
+      await supabase.from('chat_history').upsert({
+        user_id: session.user.id,
+        class_id: String(cls.id),
+        class_name: cls.name,
+        feature: 'study-plan',
+        messages: { plan: currentPlan, chatMsgs: currentChatMsgs },
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id,class_id,feature' });
+    } catch {
+      // fail gracefully
+    }
+  };
+
   useEffect(() => {
     if (chatLogRef.current) {
       chatLogRef.current.scrollTop = chatLogRef.current.scrollHeight;
@@ -414,6 +492,8 @@ function StudyPlanScreen({ cls, onBack, user, onSyncDeadlines, session }) {
         setError(data.study_plan);
       } else {
         setPlan(data.study_plan);
+        savePlanToSupabase(data.study_plan, []);
+        trackEvent(session?.user?.id, "study_plan_generated", { class_name: cls.name, mode });
       }
     } catch {
       setError("Could not reach the backend. Make sure it's running on port 8000.");
@@ -441,10 +521,11 @@ function StudyPlanScreen({ cls, onBack, user, onSyncDeadlines, session }) {
         body: JSON.stringify({ study_plan: plan, message: text, history, user_name: user?.name || "", user_role: user?.role || "" }),
       });
       const data = await res.json();
-      setChatMsgs([...updated, { role: "assistant", content: data.response }]);
-      if (data.updated_plan) {
-        setPlan(data.updated_plan);
-      }
+      const finalPlan = data.updated_plan || plan;
+      const finalMsgs = [...updated, { role: "assistant", content: data.response }];
+      setChatMsgs(finalMsgs);
+      if (data.updated_plan) setPlan(finalPlan);
+      savePlanToSupabase(finalPlan, finalMsgs);
     } catch {
       setChatMsgs([...updated, {
         role: "assistant",
@@ -545,6 +626,14 @@ function StudyPlanScreen({ cls, onBack, user, onSyncDeadlines, session }) {
 
           {error && <div className="sp-error">{error}</div>}
         </section>
+
+        {/* ── History loading state ── */}
+        {historyLoading && (
+          <div className="sp-history-loading no-print">
+            <div className="sp-spinner sp-spinner--sm" />
+            <span>Loading saved plan…</span>
+          </div>
+        )}
 
         {/* ── Loading state ── */}
         {loading && (
@@ -702,7 +791,7 @@ function AuthScreen() {
     setLoading(true);
     setError("");
     try {
-      const { error: err } = mode === "signup"
+      const { data, error: err } = mode === "signup"
         ? await supabase.auth.signUp({ email: email.trim(), password })
         : await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (err) {
@@ -715,6 +804,8 @@ function AuthScreen() {
         } else {
           setError(err.message);
         }
+      } else if (data?.user?.id) {
+        trackEvent(data.user.id, mode === "signup" ? "signup" : "login", { email: email.trim() });
       }
       // onAuthStateChange in App handles the session update
     } catch {
@@ -1378,21 +1469,64 @@ function isConceptQuestion(text) {
 function TutorScreen({ cls, onBack, user, session }) {
   const welcomeId = useRef(uid()).current;
   const firstName = user?.name?.split(" ")[0] || "there";
-  const [messages, setMessages] = useState([{
+  const welcomeMsg = {
     id: welcomeId,
     role: "assistant",
     isWelcome: true,
     content: `Hi ${firstName}! I'm your AI tutor for **${cls.name}**. I won't just hand you answers — I'll guide you through problems step by step so you build real understanding.\n\nAsk me anything, share a problem, or snap a photo of your homework. What would you like to work on?`,
-  }]);
+  };
+  const [messages, setMessages] = useState([welcomeMsg]);
 
   const [input, setInput]             = useState("");
   const [imageFile, setImageFile]     = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [loading, setLoading]         = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(true);
 
   const msgListRef    = useRef(null);
   const imageInputRef = useRef(null);
   const textareaRef   = useRef(null);
+
+  // Load saved history on mount
+  useEffect(() => {
+    const loadHistory = async () => {
+      if (!session?.user?.id) { setHistoryLoading(false); return; }
+      try {
+        const { data } = await supabase
+          .from('chat_history')
+          .select('messages')
+          .eq('user_id', session.user.id)
+          .eq('class_id', String(cls.id))
+          .eq('feature', 'tutor')
+          .single();
+        if (data?.messages?.length > 0) {
+          setMessages(data.messages.map((m) => ({ ...m, id: m.id || uid() })));
+        }
+      } catch {
+        // fail gracefully — Supabase unavailable or no saved data
+      }
+      setHistoryLoading(false);
+    };
+    loadHistory();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveTutorHistory = async (msgs) => {
+    if (!session?.user?.id) return;
+    // Strip imagePreview (potentially large base64) before saving; cap at 20 messages
+    const toSave = msgs.slice(-20).map(({ imagePreview: _ip, ...rest }) => rest);
+    try {
+      await supabase.from('chat_history').upsert({
+        user_id: session.user.id,
+        class_id: String(cls.id),
+        class_name: cls.name,
+        feature: 'tutor',
+        messages: toSave,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id,class_id,feature' });
+    } catch {
+      // fail gracefully
+    }
+  };
 
   // Scroll to bottom whenever messages or loading state changes
   useEffect(() => {
@@ -1421,7 +1555,9 @@ function TutorScreen({ cls, onBack, user, session }) {
       });
       const data = await res.json();
       if (res.status === 429) {
-        setMessages([...currentMsgs, { id: uid(), role: "assistant", content: data.detail || "You've reached your usage limit for today. Please try again tomorrow." }]);
+        const final = [...currentMsgs, { id: uid(), role: "assistant", content: data.detail || "You've reached your usage limit for today. Please try again tomorrow." }];
+        setMessages(final);
+        saveTutorHistory(final);
         setLoading(false);
         return;
       }
@@ -1442,12 +1578,16 @@ function TutorScreen({ cls, onBack, user, session }) {
         }
       }
 
-      setMessages([...currentMsgs, { id: uid(), role: "assistant", content: data.response, videoSuggestion }]);
+      const final = [...currentMsgs, { id: uid(), role: "assistant", content: data.response, videoSuggestion }];
+      setMessages(final);
+      saveTutorHistory(final);
     } catch {
-      setMessages([...currentMsgs, {
+      const final = [...currentMsgs, {
         id: uid(), role: "assistant",
         content: "Something went wrong connecting to the server. Make sure the backend is running on port 8000.",
-      }]);
+      }];
+      setMessages(final);
+      saveTutorHistory(final);
     }
     setLoading(false);
   };
@@ -1455,6 +1595,8 @@ function TutorScreen({ cls, onBack, user, session }) {
   const handleSend = async () => {
     const text = input.trim();
     if (!text && !imageFile) return;
+
+    trackEvent(session?.user?.id, "tutor_message_sent", { class_name: cls.name, subject: cls.subject.label });
 
     // Add user message to UI immediately
     const userMsg = {
@@ -1513,12 +1655,16 @@ function TutorScreen({ cls, onBack, user, session }) {
         }),
       });
       const data = await res.json();
-      setMessages([...next, { id: uid(), role: "assistant", content: data.response }]);
+      const final = [...next, { id: uid(), role: "assistant", content: data.response }];
+      setMessages(final);
+      saveTutorHistory(final);
     } catch {
-      setMessages([...next, {
+      const final = [...next, {
         id: uid(), role: "assistant",
         content: "Something went wrong. Please try again.",
-      }]);
+      }];
+      setMessages(final);
+      saveTutorHistory(final);
     }
     setLoading(false);
   };
@@ -1570,6 +1716,12 @@ function TutorScreen({ cls, onBack, user, session }) {
 
       {/* ── Message list ── */}
       <div className="tutor-msg-list" ref={msgListRef}>
+        {historyLoading && (
+          <div className="tutor-history-loading">
+            <div className="sp-spinner sp-spinner--sm" />
+            <span>Loading saved conversation…</span>
+          </div>
+        )}
         {messages.map((msg) => {
           // Action pill — no avatar, centered-right
           if (msg.isAction) {
@@ -1782,6 +1934,7 @@ function PracticeTestScreen({ cls, onBack, user, session }) {
         setGenError(data.message || "Failed to generate questions.");
       } else {
         setQuestions(data.questions);
+        trackEvent(session?.user?.id, "practice_test_generated", { class_name: cls.name, subject: cls.subject.label, question_count: questionCount, difficulty, format });
         if (testMode === "mock") setScreen("mock");
         else { setQuizIndex(0); setQuizHistory([]); setScreen("quiz"); }
       }
@@ -2561,6 +2714,15 @@ function AppSidebar({ isOpen, onClose, deadlines, todos, classes, onAddDeadline,
                         {deadlineBadgeLabel(dl.displayDays)}
                       </div>
                       <div className="sidebar-dl-actions">
+                        {buildGCalUrl(dl) && (
+                          <a
+                            className="sidebar-icon-btn sidebar-icon-btn--cal"
+                            href={buildGCalUrl(dl)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Add to Google Calendar"
+                          >📅</a>
+                        )}
                         <button className="sidebar-icon-btn" onClick={() => handleStartEdit(dl)} title="Edit">✎</button>
                         <button className="sidebar-icon-btn sidebar-icon-btn--del" onClick={() => onDeleteDeadline(dl.id)} title="Delete">×</button>
                       </div>
@@ -2644,6 +2806,36 @@ const API_BASE = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
 
 function authHeaders(session) {
   return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
+}
+
+async function trackEvent(userId, eventName, metadata = {}) {
+  if (!userId) return;
+  try {
+    await supabase.from('user_analytics').insert({
+      user_id: userId,
+      event: eventName,
+      metadata,
+    });
+  } catch {
+    // fail silently
+  }
+}
+
+function buildGCalUrl(dl) {
+  const iso = dl.isoDate || dl.date || "";
+  if (!iso) return null;
+  const start = iso.replace(/-/g, "");
+  // All-day events use YYYYMMDD; end is exclusive so add one day
+  const d = new Date(iso + "T00:00:00");
+  d.setDate(d.getDate() + 1);
+  const end = d.toISOString().slice(0, 10).replace(/-/g, "");
+  const details = [dl.className, DL_TYPE_LABELS[dl.type]].filter(Boolean).join(" · ");
+  return (
+    "https://calendar.google.com/calendar/render?action=TEMPLATE" +
+    `&text=${encodeURIComponent(dl.title)}` +
+    `&dates=${start}/${end}` +
+    `&details=${encodeURIComponent(details)}`
+  );
 }
 
 export default function App() {
