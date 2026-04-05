@@ -1,15 +1,94 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import anthropic
 import PyPDF2
 import base64
 import io
 import os
+import json as _json
 from dotenv import load_dotenv
 
 load_dotenv()
+
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+TOKEN_LIMIT = 50_000
+
+
+def _bearer(auth_header: str) -> str:
+    """Extract Bearer token from Authorization header."""
+    if auth_header.lower().startswith("bearer "):
+        return auth_header[7:].strip()
+    return ""
+
+
+def _jwt_user_id(token: str):
+    """Decode JWT payload without verification to extract sub (user_id)."""
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None
+        pad = parts[1] + "=" * (4 - len(parts[1]) % 4)
+        return _json.loads(base64.urlsafe_b64decode(pad)).get("sub")
+    except Exception:
+        return None
+
+
+async def _tokens_today(user_id: str, user_jwt: str) -> int:
+    """Return tokens used today for this user via Supabase REST API."""
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        return 0
+    try:
+        from datetime import date
+        import httpx
+        today = date.today().isoformat()
+        headers = {"Authorization": f"Bearer {user_jwt}", "apikey": SUPABASE_ANON_KEY}
+        async with httpx.AsyncClient(timeout=5.0) as http:
+            res = await http.get(
+                f"{SUPABASE_URL}/rest/v1/token_usage",
+                params={"user_id": f"eq.{user_id}", "date": f"eq.{today}", "select": "tokens_used"},
+                headers=headers,
+            )
+            if res.status_code == 200:
+                return sum(r.get("tokens_used", 0) for r in res.json())
+    except Exception:
+        pass
+    return 0
+
+
+async def _record_tokens(user_id: str, user_jwt: str, tokens: int):
+    """Increment today's token usage for this user via Supabase REST API."""
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY or tokens <= 0:
+        return
+    try:
+        from datetime import date
+        import httpx
+        today = date.today().isoformat()
+        h = {"Authorization": f"Bearer {user_jwt}", "apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json", "Prefer": "return=minimal"}
+        async with httpx.AsyncClient(timeout=5.0) as http:
+            res = await http.get(
+                f"{SUPABASE_URL}/rest/v1/token_usage",
+                params={"user_id": f"eq.{user_id}", "date": f"eq.{today}", "select": "id,tokens_used"},
+                headers=h,
+            )
+            if res.status_code == 200 and res.json():
+                row = res.json()[0]
+                await http.patch(
+                    f"{SUPABASE_URL}/rest/v1/token_usage",
+                    params={"id": f"eq.{row['id']}"},
+                    headers=h,
+                    json={"tokens_used": row.get("tokens_used", 0) + tokens},
+                )
+            else:
+                await http.post(
+                    f"{SUPABASE_URL}/rest/v1/token_usage",
+                    headers=h,
+                    json={"user_id": user_id, "date": today, "tokens_used": tokens},
+                )
+    except Exception:
+        pass
 
 app = FastAPI()
 
@@ -129,6 +208,7 @@ Never output raw symbols like ** or ## as visible text — always structure them
 
 @app.post("/study-plan")
 async def generate_study_plan(
+    request: Request,
     file: UploadFile = File(...),
     class_name: str = Form(""),
     subject: str = Form(""),
@@ -138,6 +218,13 @@ async def generate_study_plan(
     user_role: str = Form(""),
     user_education: str = Form(""),
 ):
+    user_jwt = _bearer(request.headers.get("authorization", ""))
+    user_id = _jwt_user_id(user_jwt) if user_jwt else None
+    if user_id and user_jwt:
+        used = await _tokens_today(user_id, user_jwt)
+        if used >= TOKEN_LIMIT:
+            raise HTTPException(status_code=429, detail="You've reached your usage limit for today. Please try again tomorrow.")
+
     contents = await file.read()
     filename = file.filename or ""
     system_prompt = build_study_plan_system(class_name, subject, mode, test_date, user_name, user_role, user_education)
@@ -208,6 +295,8 @@ async def generate_study_plan(
         system=system_prompt,
         messages=messages,
     )
+    if user_id and user_jwt:
+        await _record_tokens(user_id, user_jwt, message.usage.input_tokens + message.usage.output_tokens)
     return {"study_plan": message.content[0].text}
 
 
@@ -379,7 +468,6 @@ Study material:
 
 # ── AI Tutor ──────────────────────────────────────────────────────────────────
 
-import json as _json
 from typing import Optional
 
 
@@ -404,6 +492,7 @@ Never write bare fractions or exponents as plain text when LaTeX would be cleare
 
 @app.post("/tutor")
 async def tutor_chat(
+    request: Request,
     class_name: str = Form(...),
     subject: str = Form(...),
     history: str = Form("[]"),
@@ -413,6 +502,13 @@ async def tutor_chat(
     user_education: str = Form(""),
     image: Optional[UploadFile] = File(None),
 ):
+    user_jwt = _bearer(request.headers.get("authorization", ""))
+    user_id = _jwt_user_id(user_jwt) if user_jwt else None
+    if user_id and user_jwt:
+        used = await _tokens_today(user_id, user_jwt)
+        if used >= TOKEN_LIMIT:
+            raise HTTPException(status_code=429, detail="You've reached your usage limit for today. Please try again tomorrow.")
+
     system_prompt = build_tutor_system(class_name, subject, user_name, user_role, user_education)
     history_list = _json.loads(history)
 
@@ -454,6 +550,8 @@ async def tutor_chat(
         system=system_prompt,
         messages=conversation,
     )
+    if user_id and user_jwt:
+        await _record_tokens(user_id, user_jwt, message.usage.input_tokens + message.usage.output_tokens)
     return {"response": message.content[0].text}
 
 
@@ -612,6 +710,7 @@ class PracticeTestExplainRequest(BaseModel):
 
 @app.post("/practice-test-generate")
 async def practice_test_generate(
+    request: Request,
     class_name: str = Form(...),
     subject: str = Form(...),
     topics: str = Form(""),
@@ -624,6 +723,13 @@ async def practice_test_generate(
     user_education: str = Form(""),
     file: Optional[UploadFile] = File(None),
 ):
+    user_jwt = _bearer(request.headers.get("authorization", ""))
+    user_id = _jwt_user_id(user_jwt) if user_jwt else None
+    if user_id and user_jwt:
+        used = await _tokens_today(user_id, user_jwt)
+        if used >= TOKEN_LIMIT:
+            raise HTTPException(status_code=429, detail="You've reached your usage limit for today. Please try again tomorrow.")
+
     file_context = ""
     image_bytes = None
     image_media = None
@@ -707,6 +813,8 @@ IMPORTANT — Math formatting in JSON strings: Use LaTeX delimiters for all math
         questions = _json.loads(raw)
     except Exception:
         return {"error": True, "message": "Failed to parse questions.", "raw": raw}
+    if user_id and user_jwt:
+        await _record_tokens(user_id, user_jwt, message.usage.input_tokens + message.usage.output_tokens)
     return {"questions": questions}
 
 

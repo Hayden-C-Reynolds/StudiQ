@@ -3,6 +3,7 @@ import "./App.css";
 import { InlineMath, BlockMath } from "react-katex";
 import "katex/dist/katex.min.css";
 import studiqLogo from "./assets/studiq-logo.png";
+import { supabase } from './supabase';
 
 /* ═══════════════════════════════════════════════════════
    CONSTANTS
@@ -325,7 +326,7 @@ function deadlineBadgeLabel(daysUntil) {
    STUDY PLAN SCREEN
 ═══════════════════════════════════════════════════════ */
 
-function StudyPlanScreen({ cls, onBack, user, onSyncDeadlines }) {
+function StudyPlanScreen({ cls, onBack, user, onSyncDeadlines, session }) {
   const [mode, setMode]         = useState("full");    // "full" | "test-prep"
   const [testDate, setTestDate] = useState("");
   const [file, setFile]         = useState(null);
@@ -403,10 +404,13 @@ function StudyPlanScreen({ cls, onBack, user, onSyncDeadlines }) {
     try {
       const res = await fetch(`${API_BASE}/study-plan`, {
         method: "POST",
+        headers: authHeaders(session),
         body: fd,
       });
       const data = await res.json();
-      if (data.error) {
+      if (res.status === 429) {
+        setError(data.detail || "You've reached your usage limit for today. Please try again tomorrow.");
+      } else if (data.error) {
         setError(data.study_plan);
       } else {
         setPlan(data.study_plan);
@@ -682,6 +686,127 @@ function StudyPlanScreen({ cls, onBack, user, onSyncDeadlines }) {
 const ROLES = ["Student", "Faculty", "Staff"];
 const EDU_LEVELS = ["High School", "Undergraduate", "Graduate"];
 
+/* ═══════════════════════════════════════════════════════
+   AUTH SCREEN
+═══════════════════════════════════════════════════════ */
+
+function AuthScreen() {
+  const [mode, setMode]       = useState("login");
+  const [email, setEmail]     = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState("");
+
+  const handleSubmit = async () => {
+    if (!email.trim() || !password.trim()) return;
+    setLoading(true);
+    setError("");
+    try {
+      const { error: err } = mode === "signup"
+        ? await supabase.auth.signUp({ email: email.trim(), password })
+        : await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      if (err) {
+        if (err.message.includes("already registered") || err.message.includes("already exists")) {
+          setError("An account with this email already exists. Try logging in.");
+        } else if (err.message.includes("Invalid login credentials") || err.message.includes("invalid_credentials")) {
+          setError("Incorrect email or password.");
+        } else if (err.message.includes("Email not confirmed")) {
+          setError("Please verify your email before logging in.");
+        } else {
+          setError(err.message);
+        }
+      }
+      // onAuthStateChange in App handles the session update
+    } catch {
+      setError("Something went wrong. Please try again.");
+    }
+    setLoading(false);
+  };
+
+  const handleGoogle = async () => {
+    setError("");
+    const { error: err } = await supabase.auth.signInWithOAuth({ provider: "google" });
+    if (err) setError(err.message);
+  };
+
+  return (
+    <div className="onboard-page">
+      <div className="onboard-card">
+        <div className="onboard-brand">
+          <img src={studiqLogo} alt="StudiQ" className="onboard-logo-img" />
+          <p className="onboard-sub">AI-powered studying, personalized for you.</p>
+        </div>
+
+        <div className="auth-tabs">
+          <button
+            className={`auth-tab${mode === "login" ? " auth-tab--active" : ""}`}
+            onClick={() => { setMode("login"); setError(""); }}
+          >
+            Log In
+          </button>
+          <button
+            className={`auth-tab${mode === "signup" ? " auth-tab--active" : ""}`}
+            onClick={() => { setMode("signup"); setError(""); }}
+          >
+            Sign Up
+          </button>
+        </div>
+
+        <div className="onboard-fields">
+          <div className="form-group">
+            <label className="form-label" htmlFor="auth-email">Email</label>
+            <input
+              id="auth-email"
+              className="form-input"
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+              autoFocus
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="auth-password">Password</label>
+            <input
+              id="auth-password"
+              className="form-input"
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+            />
+          </div>
+        </div>
+
+        {error && <div className="auth-error">{error}</div>}
+
+        <button
+          className="btn btn-primary onboard-cta"
+          onClick={handleSubmit}
+          disabled={loading || !email.trim() || !password.trim()}
+        >
+          {loading ? "…" : mode === "login" ? "Log In" : "Create Account"}
+        </button>
+
+        <div className="auth-divider"><span>or</span></div>
+
+        <button className="auth-google-btn" onClick={handleGoogle} disabled={loading}>
+          <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+            <path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"/>
+            <path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.32-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z"/>
+            <path fill="#FBBC05" d="M11.68 28.18A13.77 13.77 0 0 1 10.8 24c0-1.45.25-2.85.68-4.18v-5.7H4.34A22.95 22.95 0 0 0 1 24c0 3.74.9 7.28 2.48 10.41l7.2-5.61-.48-1.18z" opacity=".3"/>
+            <path fill="#FBBC05" d="M4.34 13.12l7.34 5.7A13.9 13.9 0 0 1 24 10.2c3.13 0 5.95 1.08 8.17 2.85l6.12-6.12C34.9 3.74 29.76 1 24 1c-8.6 0-16.04 4.93-19.66 12.12z"/>
+            <path fill="#EA4335" d="M24 10.2c3.13 0 5.95 1.08 8.17 2.85l6.12-6.12C34.9 3.74 29.76 1 24 1c-8.6 0-16.04 4.93-19.66 12.12l7.34 5.7A13.9 13.9 0 0 1 24 10.2z"/>
+          </svg>
+          Continue with Google
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function OnboardingScreen({ onComplete }) {
   const [name, setName]           = useState("");
   const [role, setRole]           = useState(null);
@@ -940,7 +1065,7 @@ function StudyTimer() {
    NAVBAR
 ═══════════════════════════════════════════════════════ */
 
-function Navbar({ user, onToggleSidebar }) {
+function Navbar({ user, onToggleSidebar, onSignOut }) {
   return (
     <nav className="nav">
       <button className="nav-sidebar-toggle no-print" onClick={onToggleSidebar} aria-label="Toggle sidebar">
@@ -954,6 +1079,9 @@ function Navbar({ user, onToggleSidebar }) {
         <div className="nav-user">
           <div className="nav-user-avatar">{user.name.trim()[0].toUpperCase()}</div>
           <span className="nav-user-name">{user.name}</span>
+          <button className="nav-signout-btn no-print" onClick={onSignOut} title="Sign out" aria-label="Sign out">
+            ↩
+          </button>
         </div>
       )}
     </nav>
@@ -1247,7 +1375,7 @@ function isConceptQuestion(text) {
   return CONCEPT_RE.test(text);
 }
 
-function TutorScreen({ cls, onBack, user }) {
+function TutorScreen({ cls, onBack, user, session }) {
   const welcomeId = useRef(uid()).current;
   const firstName = user?.name?.split(" ")[0] || "there";
   const [messages, setMessages] = useState([{
@@ -1288,9 +1416,15 @@ function TutorScreen({ cls, onBack, user }) {
     try {
       const res = await fetch(`${API_BASE}/tutor`, {
         method: "POST",
+        headers: authHeaders(session),
         body: formData,
       });
       const data = await res.json();
+      if (res.status === 429) {
+        setMessages([...currentMsgs, { id: uid(), role: "assistant", content: data.detail || "You've reached your usage limit for today. Please try again tomorrow." }]);
+        setLoading(false);
+        return;
+      }
 
       // Fire video suggestion in parallel if the message is a concept question
       let videoSuggestion = null;
@@ -1585,7 +1719,7 @@ function TutorScreen({ cls, onBack, user }) {
    PRACTICE TEST SCREEN
 ═══════════════════════════════════════════════════════ */
 
-function PracticeTestScreen({ cls, onBack, user }) {
+function PracticeTestScreen({ cls, onBack, user, session }) {
   const [screen, setScreen] = useState("config"); // "config" | "mock" | "quiz" | "results"
   const [questions, setQuestions] = useState([]);
   const [testMode, setTestMode] = useState("mock"); // "mock" | "quiz"
@@ -1638,9 +1772,13 @@ function PracticeTestScreen({ cls, onBack, user }) {
     if (configFile) fd.append("file", configFile);
 
     try {
-      const res = await fetch(`${API_BASE}/practice-test-generate`, { method: "POST", body: fd });
+      const res = await fetch(`${API_BASE}/practice-test-generate`, { method: "POST", headers: authHeaders(session), body: fd });
       const data = await res.json();
-      if (data.error) {
+      if (res.status === 429) {
+        setGenError(data.detail || "You've reached your usage limit for today. Please try again tomorrow.");
+        setGenerating(false);
+        return;
+      } else if (data.error) {
         setGenError(data.message || "Failed to generate questions.");
       } else {
         setQuestions(data.questions);
@@ -2504,14 +2642,80 @@ function AppSidebar({ isOpen, onClose, deadlines, todos, classes, onAddDeadline,
 
 const API_BASE = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
 
+function authHeaders(session) {
+  return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
+}
+
 export default function App() {
-  const [user, setUser]                   = useState(null);
+  const [session, setSession]             = useState(null);
+  const [user, setUser]                   = useState(null);   // profile from DB
+  const [authLoading, setAuthLoading]     = useState(true);
   const [view, setView]                   = useState("home");
   const [classes, setClasses]             = useState([]);
   const [activeClass, setActiveClass]     = useState(null);
   const [activeFeature, setActiveFeature] = useState(null);
   const [showModal, setShowModal]         = useState(false);
   const [sidebarOpen, setSidebarOpen]     = useState(false);
+
+  // ── Auth: session + profile loading
+  const loadProfile = async (userId) => {
+    try {
+      const { data } = await supabase
+        .from("profiles")
+        .select("name, role, education, hardest_subject")
+        .eq("id", userId)
+        .single();
+      if (data) {
+        setUser({ name: data.name, role: data.role, education: data.education || "", hardestSubject: data.hardest_subject || "" });
+      } else {
+        setUser(null);
+      }
+    } catch {
+      setUser(null);
+    }
+    setAuthLoading(false);
+  };
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
+      setSession(s);
+      if (s) {
+        loadProfile(s.user.id);
+      } else {
+        setAuthLoading(false);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s);
+      if (s) {
+        loadProfile(s.user.id);
+      } else {
+        setUser(null);
+        setAuthLoading(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleOnboardingComplete = async (profile) => {
+    if (!session) return;
+    await supabase.from("profiles").insert({
+      id: session.user.id,
+      name: profile.name,
+      role: profile.role,
+      education: profile.education,
+      hardest_subject: profile.hardestSubject,
+    });
+    setUser(profile);
+  };
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setSession(null);
+  };
 
   // ── Global deadlines state
   const [deadlines, setDeadlines] = useState([]);
@@ -2531,7 +2735,6 @@ export default function App() {
       type: d.type || "other",
       isManual: false,
     }));
-    // Replace auto-synced deadlines for this class, keep manual ones
     setDeadlines(prev => [
       ...prev.filter(d => d.classId !== cls.id || d.isManual),
       ...mapped,
@@ -2544,9 +2747,16 @@ export default function App() {
   const handleToggleTodo = (id)   => setTodos(prev => prev.map(t => t.id === id ? { ...t, done: !t.done } : t));
   const handleDeleteTodo = (id)   => setTodos(prev => prev.filter(t => t.id !== id));
 
-  if (!user) {
-    return <OnboardingScreen onComplete={setUser} />;
+  // ── Routing guards
+  if (authLoading) {
+    return (
+      <div className="auth-loading">
+        <div className="auth-loading-spinner" />
+      </div>
+    );
   }
+  if (!session) return <AuthScreen />;
+  if (!user) return <OnboardingScreen onComplete={handleOnboardingComplete} />;
 
   const handleSelectClass = (cls) => {
     setActiveClass(cls);
@@ -2566,7 +2776,7 @@ export default function App() {
 
   return (
     <>
-      <Navbar user={user} onToggleSidebar={() => setSidebarOpen(v => !v)} />
+      <Navbar user={user} onToggleSidebar={() => setSidebarOpen(v => !v)} onSignOut={handleSignOut} />
 
       <div className="app-body">
         <AppSidebar
@@ -2604,11 +2814,11 @@ export default function App() {
 
           {view === "feature" && activeClass && activeFeature && (
             activeFeature.id === "study-plan" ? (
-              <StudyPlanScreen cls={activeClass} onBack={() => setView("class")} user={user} onSyncDeadlines={handleSyncDeadlines} />
+              <StudyPlanScreen cls={activeClass} onBack={() => setView("class")} user={user} session={session} onSyncDeadlines={handleSyncDeadlines} />
             ) : activeFeature.id === "tutor" ? (
-              <TutorScreen cls={activeClass} onBack={() => setView("class")} user={user} />
+              <TutorScreen cls={activeClass} onBack={() => setView("class")} user={user} session={session} />
             ) : activeFeature.id === "practice-test" ? (
-              <PracticeTestScreen cls={activeClass} onBack={() => setView("class")} user={user} />
+              <PracticeTestScreen cls={activeClass} onBack={() => setView("class")} user={user} session={session} />
             ) : (
               <FeaturePlaceholder cls={activeClass} feature={activeFeature} onBack={() => setView("class")} />
             )
