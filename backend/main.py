@@ -14,7 +14,7 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
-TOKEN_LIMIT = 10_000
+TOKEN_LIMIT = 65000
 
 
 def _bearer(auth_header: str) -> str:
