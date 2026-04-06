@@ -197,6 +197,31 @@
   cursor: not-allowed;
 }
 
+.auth-guest-btn {
+  width: 100%;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1.5px dashed var(--border);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.auth-guest-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.auth-guest-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ── Auth loading splash ────────────────────────────── */
 .auth-loading {
   min-height: 100vh;
@@ -239,6 +264,26 @@
 .nav-signout-btn:hover {
   background: #FEF2F2;
   color: #DC2626;
+}
+
+.nav-create-account-btn {
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1.5px solid var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.nav-create-account-btn:hover {
+  background: var(--primary);
+  color: #fff;
 }
 
 .form-label-opt {

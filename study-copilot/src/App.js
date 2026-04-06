@@ -534,7 +534,7 @@ function StudyPlanScreen({ cls, onBack, user, onSyncDeadlines, session }) {
     fd.append("test_date", testDate.trim());
     fd.append("user_name", user?.name || "");
     fd.append("user_role", user?.role || "");
-    fd.append("user_education", user?.education || "");
+    fd.append("user_education", user?.role || "");
 
     try {
       const res = await fetch(`${API_BASE}/study-plan`, {
@@ -829,8 +829,7 @@ function StudyPlanScreen({ cls, onBack, user, onSyncDeadlines, session }) {
    ONBOARDING SCREEN
 ═══════════════════════════════════════════════════════ */
 
-const ROLES = ["Student", "Faculty", "Staff"];
-const EDU_LEVELS = ["High School", "Undergraduate", "Graduate"];
+const ROLES = ["High School Student", "College Student", "Graduate Student", "Self-Learner", "Teacher"];
 
 /* ═══════════════════════════════════════════════════════
    AUTH SCREEN
@@ -875,6 +874,14 @@ function AuthScreen() {
     setError("");
     const { error: err } = await supabase.auth.signInWithOAuth({ provider: "google" });
     if (err) setError(err.message);
+  };
+
+  const handleGuest = async () => {
+    setLoading(true);
+    setError("");
+    const { error: err } = await supabase.auth.signInAnonymously();
+    if (err) setError("Guest login unavailable, please sign up.");
+    setLoading(false);
   };
 
   return (
@@ -950,22 +957,27 @@ function AuthScreen() {
           </svg>
           Continue with Google
         </button>
+
+        <div className="auth-divider"><span>or</span></div>
+
+        <button className="auth-guest-btn" onClick={handleGuest} disabled={loading}>
+          Try as Guest
+        </button>
       </div>
     </div>
   );
 }
 
 function OnboardingScreen({ onComplete }) {
-  const [name, setName]           = useState("");
-  const [role, setRole]           = useState(null);
-  const [education, setEducation] = useState(null);
-  const [hardest, setHardest]     = useState("");
+  const [name, setName]   = useState("");
+  const [role, setRole]   = useState(null);
+  const [hardest, setHardest] = useState("");
 
   const canSubmit = name.trim().length > 0 && role !== null;
 
   const handleSubmit = () => {
     if (!canSubmit) return;
-    onComplete({ name: name.trim(), role, education: education || "", hardestSubject: hardest.trim() });
+    onComplete({ name: name.trim(), role, education: role, hardestSubject: hardest.trim() });
   };
 
   return (
@@ -1002,22 +1014,6 @@ function OnboardingScreen({ onComplete }) {
                   type="button"
                 >
                   {r}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Education level</label>
-            <div className="onboard-pill-row">
-              {EDU_LEVELS.map((lvl) => (
-                <button
-                  key={lvl}
-                  className={`onboard-pill${education === lvl ? " onboard-pill--active" : ""}`}
-                  onClick={() => setEducation(lvl)}
-                  type="button"
-                >
-                  {lvl}
                 </button>
               ))}
             </div>
@@ -1213,7 +1209,8 @@ function StudyTimer() {
    NAVBAR
 ═══════════════════════════════════════════════════════ */
 
-function Navbar({ user, onToggleSidebar, onSignOut }) {
+function Navbar({ user, session, onToggleSidebar, onSignOut }) {
+  const isGuest = session?.user?.is_anonymous === true;
   return (
     <nav className="nav">
       <button className="nav-sidebar-toggle no-print" onClick={onToggleSidebar} aria-label="Toggle sidebar">
@@ -1227,9 +1224,15 @@ function Navbar({ user, onToggleSidebar, onSignOut }) {
         <div className="nav-user">
           <div className="nav-user-avatar">{user.name.trim()[0].toUpperCase()}</div>
           <span className="nav-user-name">{user.name}</span>
-          <button className="nav-signout-btn no-print" onClick={onSignOut} title="Sign out" aria-label="Sign out">
-            ↩
-          </button>
+          {isGuest ? (
+            <button className="nav-create-account-btn no-print" onClick={onSignOut} title="Create an account">
+              Create Account
+            </button>
+          ) : (
+            <button className="nav-signout-btn no-print" onClick={onSignOut} title="Sign out" aria-label="Sign out">
+              ↩
+            </button>
+          )}
         </div>
       )}
     </nav>
@@ -1710,7 +1713,7 @@ function TutorScreen({ cls, onBack, user, session }) {
     fd.append("user_message", text || "Please help me with this problem.");
     fd.append("user_name", user?.name || "");
     fd.append("user_role", user?.role || "");
-    fd.append("user_education", user?.education || "");
+    fd.append("user_education", user?.role || "");
     if (imageFile) fd.append("image", imageFile);
 
     await sendToApi(fd, next, text);
@@ -1739,7 +1742,7 @@ function TutorScreen({ cls, onBack, user, session }) {
           action,
           user_name: user?.name || "",
           user_role: user?.role || "",
-          user_education: user?.education || "",
+          user_education: user?.role || "",
         }),
       });
       const data = await res.json();
@@ -2008,7 +2011,7 @@ function PracticeTestScreen({ cls, onBack, user, session }) {
     fd.append("additional_instructions", additionalInstructions);
     fd.append("user_name", user?.name || "");
     fd.append("user_role", user?.role || "");
-    fd.append("user_education", user?.education || "");
+    fd.append("user_education", user?.role || "");
     if (configFile) fd.append("file", configFile);
 
     try {
@@ -2940,7 +2943,20 @@ export default function App() {
   const dataLoadedRef = useRef(false);
 
   // ── Auth: session + profile loading
-  const loadProfile = async (userId) => {
+  const loadProfile = async (s) => {
+    const userId = s.user.id;
+
+    // Anonymous (guest) users skip onboarding and get a default profile
+    if (s.user.is_anonymous) {
+      setUser({ name: "Guest", role: "College Student", education: "College Student", hardestSubject: "" });
+      if (!dataLoadedRef.current) {
+        await loadUserData(userId);
+        dataLoadedRef.current = true;
+      }
+      setAuthLoading(false);
+      return;
+    }
+
     try {
       const { data } = await supabase
         .from("profiles")
@@ -2967,7 +2983,7 @@ export default function App() {
     supabase.auth.getSession().then(({ data: { session: s } }) => {
       setSession(s);
       if (s) {
-        loadProfile(s.user.id);
+        loadProfile(s);
       } else {
         setAuthLoading(false);
       }
@@ -2976,7 +2992,7 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
       if (s) {
-        loadProfile(s.user.id);
+        loadProfile(s);
       } else {
         setUser(null);
         setAuthLoading(false);
@@ -3203,7 +3219,7 @@ export default function App() {
 
   return (
     <>
-      <Navbar user={user} onToggleSidebar={() => setSidebarOpen(v => !v)} onSignOut={handleSignOut} />
+      <Navbar user={user} session={session} onToggleSidebar={() => setSidebarOpen(v => !v)} onSignOut={handleSignOut} />
 
       <div className="app-body">
         <AppSidebar
