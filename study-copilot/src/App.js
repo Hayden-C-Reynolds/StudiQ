@@ -87,6 +87,7 @@ import { InlineMath, BlockMath } from "react-katex";
 import "katex/dist/katex.min.css";
 import studiqLogo from "./assets/studiq-logo.png";
 import { supabase } from './supabase';
+import { Analytics } from '@vercel/analytics/react';
 
 /* ═══════════════════════════════════════════════════════
    CONSTANTS
@@ -3252,6 +3253,7 @@ export default function App() {
       </div>
 
       <FeedbackWidget />
+      <Analytics />
 
       {showModal && (
         <CreateClassModal
