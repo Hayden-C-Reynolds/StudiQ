@@ -88,6 +88,7 @@ import "katex/dist/katex.min.css";
 import studiqLogo from "./assets/studiq-logo.png";
 import { supabase } from './supabase';
 import { Analytics } from '@vercel/analytics/react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 
 /* ═══════════════════════════════════════════════════════
    CONSTANTS
@@ -3254,6 +3255,7 @@ export default function App() {
 
       <FeedbackWidget />
       <Analytics />
+      <SpeedInsights />
 
       {showModal && (
         <CreateClassModal
