@@ -872,7 +872,10 @@ function AuthScreen() {
 
   const handleGoogle = async () => {
     setError("");
-    const { error: err } = await supabase.auth.signInWithOAuth({ provider: "google" });
+    const { error: err } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.origin },
+    });
     if (err) setError(err.message);
   };
 
