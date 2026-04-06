@@ -1242,28 +1242,6 @@ function Navbar({ user, session, onToggleSidebar, onSignOut }) {
   );
 }
 
-function FeedbackWidget() {
-  return (
-    <div className="feedback-widget no-print">
-      <a
-        className="feedback-btn"
-        href="https://docs.google.com/forms/d/e/1FAIpQLSd7ckUeLYfarUQywXUgQw4BcTmEmnZBZP6Nh6dFfGr7hkEqlQ/viewform?usp=publish-editor"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        Give Feedback
-      </a>
-      <a
-        className="feedback-btn feedback-btn--survey"
-        href="https://docs.google.com/forms/d/e/1FAIpQLScNLU0GFdiFKtKdUuKlypbos3xre_N2IXwgn2EKV5iRd5R_2w/viewform?usp=publish-editor"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        Take Our Survey
-      </a>
-    </div>
-  );
-}
 
 /* ═══════════════════════════════════════════════════════
    CREATE CLASS MODAL
@@ -1360,6 +1338,24 @@ function HomeScreen({ classes, onAdd, onSelect, user }) {
               ? "Create your first class to get started."
               : "Pick a class to dive in, or add a new one."}
           </p>
+          <div className="hero-feedback-row">
+            <a
+              className="hero-feedback-pill"
+              href="https://docs.google.com/forms/d/e/1FAIpQLSd7ckUeLYfarUQywXUgQw4BcTmEmnZBZP6Nh6dFfGr7hkEqlQ/viewform?usp=publish-editor"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Give Feedback
+            </a>
+            <a
+              className="hero-feedback-pill hero-feedback-pill--survey"
+              href="https://docs.google.com/forms/d/e/1FAIpQLScNLU0GFdiFKtKdUuKlypbos3xre_N2IXwgn2EKV5iRd5R_2w/viewform?usp=publish-editor"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Take Our Survey
+            </a>
+          </div>
         </div>
 
         <div className="class-grid">
@@ -3272,7 +3268,6 @@ export default function App() {
         </div>
       </div>
 
-      <FeedbackWidget />
       <Analytics />
       <SpeedInsights />
 
