@@ -1234,6 +1234,29 @@ function Navbar({ user, onToggleSidebar, onSignOut }) {
   );
 }
 
+function FeedbackWidget() {
+  return (
+    <div className="feedback-widget no-print">
+      <a
+        className="feedback-btn"
+        href="https://docs.google.com/forms/d/e/1FAIpQLSd7ckUeLYfarUQywXUgQw4BcTmEmnZBZP6Nh6dFfGr7hkEqlQ/viewform?usp=publish-editor"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        Give Feedback
+      </a>
+      <a
+        className="feedback-btn feedback-btn--survey"
+        href="https://docs.google.com/forms/d/e/1FAIpQLScNLU0GFdiFKtKdUuKlypbos3xre_N2IXwgn2EKV5iRd5R_2w/viewform?usp=publish-editor"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        Take Our Survey
+      </a>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════
    CREATE CLASS MODAL
 ═══════════════════════════════════════════════════════ */
@@ -3227,6 +3250,8 @@ export default function App() {
           )}
         </div>
       </div>
+
+      <FeedbackWidget />
 
       {showModal && (
         <CreateClassModal
